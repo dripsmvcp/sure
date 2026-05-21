@@ -61,6 +61,31 @@ class BalanceSheetTest < ActiveSupport::TestCase
     assert_equal 5000, asset_groups.find { |ag| ag.name == OtherAsset.display_name }.total
   end
 
+  test "scopes to accounts the user owns or has been shared with" do
+    family = families(:dylan_family)
+    admin = users(:family_admin)
+    member = users(:family_member)
+
+    admin_balance_sheet = BalanceSheet.new(family, user: admin)
+    member_balance_sheet = BalanceSheet.new(family, user: member)
+
+    admin_account_names = admin_balance_sheet.account_groups.flat_map { |g| g.accounts.map(&:name) }
+    member_account_names = member_balance_sheet.account_groups.flat_map { |g| g.accounts.map(&:name) }
+
+    assert_includes admin_account_names, "Checking Account"
+    assert_includes admin_account_names, "Collectable Account"
+    assert_includes admin_account_names, "Plaid Depository Account"
+
+    assert_includes member_account_names, "Checking Account"
+    assert_includes member_account_names, "Credit Card"
+    refute_includes member_account_names, "Collectable Account",
+      "Member should not see unshared assets in the balance sheet sidebar"
+    refute_includes member_account_names, "IOU (personal debt to friend)",
+      "Member should not see unshared liabilities in the balance sheet sidebar"
+    refute_includes member_account_names, "Plaid Depository Account",
+      "Member should not see unshared connected accounts in the balance sheet sidebar"
+  end
+
   test "calculates liability group totals" do
     create_account(balance: 1000, accountable: CreditCard.new)
     create_account(balance: 2000, accountable: CreditCard.new)

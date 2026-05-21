@@ -62,6 +62,24 @@ class PagesControllerTest < ActionDispatch::IntegrationTest
     assert sankey_data.fetch("nodes").any? { |node| node.fetch("id").start_with?("expense_") }
   end
 
+  test "sidebar omits accounts the current user does not own or share (regression for #1803)" do
+    sign_in users(:family_member)
+
+    get root_path
+
+    assert_response :ok
+    assert_match "Checking Account", response.body,
+      "Expected the sidebar to list the explicitly shared account"
+    assert_match "Credit Card", response.body,
+      "Expected the sidebar to list the read-only shared account"
+    refute_match "Collectable Account", response.body,
+      "Sidebar must not leak unshared assets to a non-owner family member"
+    refute_match "IOU (personal debt to friend)", response.body,
+      "Sidebar must not leak unshared liabilities to a non-owner family member"
+    refute_match "Plaid Depository Account", response.body,
+      "Sidebar must not leak unshared connected accounts to a non-owner family member"
+  end
+
   test "changelog" do
     VCR.use_cassette("git_repository_provider/fetch_latest_release_notes") do
       get changelog_path
