@@ -21,12 +21,16 @@ export default class extends Controller {
   #minSegmentAngle = 0.02; // Minimum angle in radians (~1.15 degrees)
   #padAngle = 0.005; // Spacing between segments (~0.29 degrees)
   #visiblePaths = null;
+  #resizeRaf = null;
+  #centerTextFitFactor = 0.85; // fraction of inner diameter the amount may occupy
+  #minCenterFontSize = 14; // px — don't shrink the amount below ~text-sm
 
   connect() {
     this.#draw();
     document.addEventListener("turbo:load", this.#redraw);
     this.element.addEventListener("mouseleave", this.#clearSegmentHover);
     this.contentContainerTarget.addEventListener("mouseleave", this.#clearSegmentHover);
+    window.addEventListener("resize", this.#onResize);
   }
 
   disconnect() {
@@ -34,6 +38,8 @@ export default class extends Controller {
     document.removeEventListener("turbo:load", this.#redraw);
     this.element.removeEventListener("mouseleave", this.#clearSegmentHover);
     this.contentContainerTarget.removeEventListener("mouseleave", this.#clearSegmentHover);
+    window.removeEventListener("resize", this.#onResize);
+    if (this.#resizeRaf) cancelAnimationFrame(this.#resizeRaf);
   }
 
   get #data() {
@@ -165,7 +171,60 @@ export default class extends Controller {
           this.#handleClick(d.data);
         }
       });
+
+    // Fit the center amount once the SVG (and therefore the container) is laid out.
+    requestAnimationFrame(() => this.#fitVisibleContent());
   }
+
+  // Downscales the center "amount" text (marked .js-donut-amount) so it never
+  // overflows the donut's inner ring. The SVG uses a fixed 100-unit square
+  // viewBox scaled to the container, so the inner ring's pixel diameter is
+  // min(width, height) * (viewBox - 2*segmentHeight) / viewBox. We measure the
+  // amount's natural width at its CSS size (text-3xl) and shrink it
+  // proportionally when it exceeds the available inner width (issue #2002).
+  #fitText(container) {
+    if (!container) return;
+
+    const available = this.#availableCenterWidth();
+    if (available <= 0) return;
+
+    for (const el of container.querySelectorAll(".js-donut-amount")) {
+      el.style.fontSize = ""; // reset to the CSS default before measuring
+      const natural = el.getBoundingClientRect().width;
+      if (natural > available) {
+        const base = Number.parseFloat(getComputedStyle(el).fontSize) || 30;
+        const scaled = Math.max(
+          (base * available) / natural,
+          this.#minCenterFontSize,
+        );
+        el.style.fontSize = `${scaled}px`;
+      }
+    }
+  }
+
+  #availableCenterWidth() {
+    const size = Math.min(this.element.clientWidth, this.element.clientHeight);
+    if (!size) return 0;
+
+    const innerDiameterFraction =
+      (this.#viewBoxSize - 2 * this.segmentHeightValue) / this.#viewBoxSize;
+    return size * innerDiameterFraction * this.#centerTextFitFactor;
+  }
+
+  #fitVisibleContent = () => {
+    if (!this.hasContentContainerTarget) return;
+
+    for (const child of this.contentContainerTarget.children) {
+      if (!child.classList.contains("hidden")) {
+        this.#fitText(child);
+      }
+    }
+  };
+
+  #onResize = () => {
+    if (this.#resizeRaf) cancelAnimationFrame(this.#resizeRaf);
+    this.#resizeRaf = requestAnimationFrame(() => this.#fitVisibleContent());
+  };
 
   #transformRingColor = ({ data: { id, color } }) => {
     if (id === this.unusedSegmentIdValue || id === this.overageSegmentIdValue) {
@@ -202,6 +261,7 @@ export default class extends Controller {
 
     this.defaultContentTarget.classList.add("hidden");
     template.classList.remove("hidden");
+    this.#fitText(template);
   }
 
   // Restores original segment colors and hides segment specific content
