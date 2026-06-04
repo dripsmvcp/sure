@@ -256,6 +256,45 @@ class BudgetCategoryTest < ActiveSupport::TestCase
     assert @subcategory_inheriting_bc.visible_on_track?
   end
 
+  # Regression: issue #2074 Bug 2. Before this fix, inheriting subcategories
+  # returned `parent.available_to_spend` unconditionally — so children with
+  # 0 own budget and 0 own spending displayed the parent's "Over by" amount
+  # as their own overspent figure (e.g. parent over by 42.75 → every 0/0
+  # "(shared)" child also shows 42.75 overspent). The shared-pool design from
+  # #579 still applies to inheriting children that ARE spending (they still
+  # mirror the parent), but a child that hasn't drawn from the pool has no
+  # business carrying the parent's alert.
+  test "inheriting subcategory with zero spending does not mirror parent's overspent state" do
+    @parent_budget_category.update!(budgeted_spending: 45)
+    @subcategory_with_limit_bc.update!(budgeted_spending: 45)
+    @budget.stubs(:budget_category_actual_spending).with(@parent_budget_category).returns(42)
+    @budget.stubs(:budget_category_actual_spending).with(@subcategory_with_limit_bc).returns(42)
+    @budget.stubs(:budget_category_actual_spending).with(@subcategory_inheriting_bc).returns(0)
+
+    # Sanity: parent IS overspent under the existing shared-pool math
+    # (shared_pool = 45 - 45 = 0; shared_pool_spending = 42 - 42 = 0; available = 0).
+    # The bug surfaced when the parent went truly negative; the principle is the
+    # same: an empty inheriting row must not display the parent's alert.
+    @parent_budget_category.stubs(:available_to_spend).returns(-42.75)
+
+    assert_equal 0, @subcategory_inheriting_bc.available_to_spend,
+                 "inheriting child with zero spending must not inherit parent's overspent value"
+    refute @subcategory_inheriting_bc.over_budget?,
+           "0-spent / 0-own-budget '(shared)' child must not be flagged over_budget"
+  end
+
+  # Companion: confirms the deliberate non-change — inheriting children that
+  # ARE drawing from the parent pool still mirror parent state. This preserves
+  # the #579 / #756 "(shared)" UX for the case where it carries real meaning.
+  test "inheriting subcategory with own spending still mirrors parent available_to_spend" do
+    parent_stub = mock("parent_budget_category")
+    parent_stub.stubs(:available_to_spend).returns(200)
+    @subcategory_inheriting_bc.stubs(:parent_budget_category).returns(parent_stub)
+    @budget.stubs(:budget_category_actual_spending).with(@subcategory_inheriting_bc).returns(50)
+
+    assert_equal 200, @subcategory_inheriting_bc.available_to_spend
+  end
+
   test "suggested_daily_spending uses budget.end_date for custom month periods" do
     @family.update!(month_start_day: 15)
 

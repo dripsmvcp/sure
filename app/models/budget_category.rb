@@ -104,6 +104,12 @@ class BudgetCategory < ApplicationRecord
       # Subcategories using parent budget share the parent's available_to_spend
       parent = parent_budget_category
       return 0 unless parent
+      # Issue #2074 Bug 2: an inheriting subcategory that hasn't spent anything
+      # has no role in the shared pool yet — don't paint the parent's overspent
+      # state onto every empty "(shared)" row. Children that ARE drawing from
+      # the pool (spending > 0) still mirror the parent, preserving the #579
+      # shared-pool design for the case where it carries real meaning.
+      return 0 if actual_spending.zero?
       parent.available_to_spend
     elsif subcategory?
       # Subcategory with individual limit
