@@ -73,6 +73,43 @@ class Assistant::Function::CreateGoalTest < ActiveSupport::TestCase
     assert_equal "currency_mismatch", result[:error]
   end
 
+  test "scopes available_accounts to the user's accessible accounts (#1803)" do
+    member = users(:family_member)
+    fn = Assistant::Function::CreateGoal.new(member)
+
+    result = fn.call("name" => "X", "target_amount" => 100, "linked_account_names" => [])
+
+    assert_equal false, result[:success]
+    available_names = result[:available_accounts].map { |a| a[:name] }
+    assert_includes available_names, accounts(:depository).name,
+      "Expected member's shared depository to appear in available_accounts"
+    refute_includes available_names, "Collectable Account",
+      "available_accounts must not leak the admin's unshared accounts"
+  end
+
+  test "rejects linking a Depository account the user does not own or share (#1803)" do
+    member = users(:family_member)
+    unshared_account = Account.create!(
+      family: families(:dylan_family),
+      accountable: Depository.new,
+      name: "Private Checking",
+      currency: "USD",
+      balance: 100,
+      owner: users(:family_admin),
+    )
+    fn = Assistant::Function::CreateGoal.new(member)
+
+    result = fn.call(
+      "name" => "Sneak",
+      "target_amount" => 100,
+      "linked_account_names" => [ unshared_account.name ]
+    )
+
+    assert_equal false, result[:success]
+    assert_equal "unknown_accounts", result[:error]
+    assert_includes result[:unknown_names], unshared_account.name
+  end
+
   test "scopes to the user's family" do
     other_family = Family.create!(name: "Other", currency: "USD", locale: "en", country: "US", timezone: "UTC")
     Account.create!(family: other_family, accountable: Depository.new, name: "Foreign Checking", currency: "USD", balance: 100)

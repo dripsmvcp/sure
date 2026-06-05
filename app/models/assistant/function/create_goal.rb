@@ -82,7 +82,7 @@ class Assistant::Function::CreateGoal < Assistant::Function
       )
     end
 
-    available = family.accounts.where(accountable_type: "Depository").visible.where(name: linked_account_names)
+    available = user.accessible_accounts.where(accountable_type: "Depository").visible.where(name: linked_account_names)
     missing = linked_account_names - available.pluck(:name).uniq
     if missing.any?
       return error(
@@ -175,7 +175,7 @@ class Assistant::Function::CreateGoal < Assistant::Function
     end
 
     def depository_account_payload
-      family.accounts.where(accountable_type: "Depository").visible.pluck(:name, :currency).map { |n, c| { name: n, currency: c } }
+      user.accessible_accounts.where(accountable_type: "Depository").visible.pluck(:name, :currency).map { |n, c| { name: n, currency: c } }
     end
 
     def error(key, message, extras = {})
